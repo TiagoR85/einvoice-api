@@ -25,6 +25,7 @@ public sealed class ContainersFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await Task.WhenAll(Postgres.StartAsync(), Redis.StartAsync(), RabbitMq.StartAsync());
+        EinvoiceApiFactory.Containers = this;
     }
 
     public async Task DisposeAsync() =>

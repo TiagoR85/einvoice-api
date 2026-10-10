@@ -21,7 +21,7 @@ public class PersistenceTests
             .Options;
 
         await using var seedContext = new EinvoiceDbContext(options);
-        await seedContext.Database.EnsureCreatedAsync();
+        await seedContext.Database.MigrateAsync();
 
         var seller = Party.Create("Seller SA", "PT", "PT111", PartyType.Supplier);
         var buyer = Party.Create("Buyer SA", "ES", "ES222", PartyType.Customer);

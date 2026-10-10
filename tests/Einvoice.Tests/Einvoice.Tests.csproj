@@ -10,6 +10,7 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="Testcontainers.RabbitMq" />
     <PackageReference Include="Testcontainers.Redis" />
@@ -20,5 +21,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Einvoice.Domain\Einvoice.Domain.csproj" />
     <ProjectReference Include="..\..\src\Einvoice.Infrastructure\Einvoice.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Einvoice.Api\Einvoice.Api.csproj" />
   </ItemGroup>
 </Project>
