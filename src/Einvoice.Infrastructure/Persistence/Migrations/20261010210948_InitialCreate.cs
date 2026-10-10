@@ -114,7 +114,7 @@ namespace Einvoice.Infrastructure.Persistence.Migrations
                     Quantity = table.Column<decimal>(type: "numeric", nullable: false),
                     UnitPrice = table.Column<decimal>(type: "numeric", nullable: false),
                     VatRate = table.Column<decimal>(type: "numeric", nullable: false),
-                    InvoiceId = table.Column<Guid>(type: "uuid", nullable: true)
+                    InvoiceId = table.Column<Guid>(type: "uuid", nullable: false)
                 },
                 constraints: table =>
                 {

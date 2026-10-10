@@ -71,7 +71,7 @@ namespace Einvoice.Infrastructure.Persistence.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
-                    b.Property<Guid?>("InvoiceId")
+                    b.Property<Guid>("InvoiceId")
                         .HasColumnType("uuid");
 
                     b.Property<decimal>("Quantity")
@@ -364,7 +364,8 @@ namespace Einvoice.Infrastructure.Persistence.Migrations
                     b.HasOne("Einvoice.Domain.Invoice", null)
                         .WithMany("Lines")
                         .HasForeignKey("InvoiceId")
-                        .OnDelete(DeleteBehavior.Cascade);
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", b =>
