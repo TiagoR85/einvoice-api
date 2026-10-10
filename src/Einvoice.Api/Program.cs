@@ -1,4 +1,6 @@
 using Einvoice.Api.Auth;
+using Einvoice.Api.Modules.Documents;
+using Einvoice.Api.Modules.Parties;
 using Einvoice.Infrastructure;
 using Einvoice.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -26,6 +28,9 @@ app.UseAuthorization();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "Healthy" }))
     .AllowAnonymous();
+
+app.MapParties();
+app.MapDocuments();
 
 app.Run();
 

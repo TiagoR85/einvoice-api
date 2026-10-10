@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
 using OpenIddict.Server.AspNetCore;
+using OpenIddict.Validation.AspNetCore;
 using System.Security.Claims;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
@@ -33,6 +34,7 @@ public static class DependencyInjection
                 options.RegisterScopes("invoice:read", "invoice:write");
                 options.AddDevelopmentEncryptionCertificate();
                 options.AddDevelopmentSigningCertificate();
+                options.DisableAccessTokenEncryption();
                 options.AddEventHandler<OpenIddictServerEvents.HandleTokenRequestContext>(descriptor =>
                     descriptor.UseInlineHandler(context =>
                     {
@@ -60,6 +62,8 @@ public static class DependencyInjection
                 options.UseLocalServer();
                 options.UseAspNetCore();
             });
+
+        services.AddAuthentication(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
 
         services.AddStackExchangeRedisCache(options =>
         {
