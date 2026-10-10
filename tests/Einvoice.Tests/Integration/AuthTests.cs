@@ -43,4 +43,24 @@ public class AuthTests
             }));
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Reseed_WithNewSecret_RepairsExistingClient()
+    {
+        var factoryA = new EinvoiceApiFactory();
+        await factoryA.GetTokenAsync();
+
+        const string secretB = "rotated-secret-for-reseed-test";
+        var factoryB = new EinvoiceApiFactory(secretB);
+        var client = factoryB.CreateClient();
+        var response = await client.PostAsync("/connect/token",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "client_credentials",
+                ["client_id"] = factoryB.ClientId,
+                ["client_secret"] = secretB,
+                ["scope"] = "invoice:read"
+            }));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
 }

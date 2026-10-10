@@ -11,7 +11,12 @@ public sealed class EinvoiceApiFactory : WebApplicationFactory<Program>
     public static ContainersFixture? Containers { get; set; }
 
     public string ClientId { get; } = "einvoice-test-client";
-    public string ClientSecret { get; } = "test-secret-do-not-use-in-prod";
+    public string ClientSecret { get; }
+
+    public EinvoiceApiFactory(string? clientSecret = null)
+    {
+        ClientSecret = clientSecret ?? "test-secret-do-not-use-in-prod";
+    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
