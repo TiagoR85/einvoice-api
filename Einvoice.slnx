@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Einvoice.Domain/Einvoice.Domain.csproj" />
+    <Project Path="src/Einvoice.Infrastructure/Einvoice.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Einvoice.Tests/Einvoice.Tests.csproj" />
