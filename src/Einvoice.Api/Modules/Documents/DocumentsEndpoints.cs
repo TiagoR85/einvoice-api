@@ -1,5 +1,6 @@
 using Einvoice.Domain;
 using Einvoice.Infrastructure.Persistence;
+using Einvoice.Infrastructure.Redis;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
@@ -18,7 +19,12 @@ public static class DocumentsEndpoints
         return app;
     }
 
-    private static async Task<IResult> Create(CreateInvoiceRequest request, EinvoiceDbContext db, CancellationToken ct)
+    private static async Task<IResult> Create(
+        CreateInvoiceRequest request,
+        EinvoiceDbContext db,
+        RedisIdempotencyStore idempotency,
+        HttpContext http,
+        CancellationToken ct)
     {
         if (request is null || request.Lines is null
             || string.IsNullOrWhiteSpace(request.IssueDate) || string.IsNullOrWhiteSpace(request.DueDate))
@@ -28,6 +34,13 @@ public static class DocumentsEndpoints
                 detail: "'lines', 'issueDate' and 'dueDate' are required.",
                 statusCode: 400);
         }
+
+        if (!http.Request.Headers.TryGetValue("Idempotency-Key", out var key) || string.IsNullOrWhiteSpace(key))
+            return Results.Problem(title: "Idempotency-Key header is required.", statusCode: 400);
+
+        var cached = await idempotency.GetAsync(key!);
+        if (cached is not null)
+            return Results.Text(cached, "application/json");
 
         try
         {
@@ -48,7 +61,11 @@ public static class DocumentsEndpoints
             db.OutboxMessages.Add(outbox);
             await db.SaveChangesAsync(ct);
 
-            return Results.Created($"/v1/invoices/{invoice.Id}", invoice.ToResponse());
+            var response = invoice.ToResponse();
+            var json = JsonSerializer.Serialize(response, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            await idempotency.SetAsync(key!, json, TimeSpan.FromHours(24));
+
+            return Results.Created($"/v1/invoices/{invoice.Id}", response);
         }
         catch (DomainValidationException ex)
         {

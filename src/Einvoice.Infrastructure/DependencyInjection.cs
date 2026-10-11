@@ -1,4 +1,5 @@
 using Einvoice.Infrastructure.Persistence;
+using Einvoice.Infrastructure.Redis;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -69,6 +70,8 @@ public static class DependencyInjection
         {
             options.Configuration = configuration.GetConnectionString("Redis");
         });
+
+        services.AddSingleton<RedisIdempotencyStore>();
 
         return services;
     }
