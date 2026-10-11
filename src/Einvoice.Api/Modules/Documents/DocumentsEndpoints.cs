@@ -20,6 +20,15 @@ public static class DocumentsEndpoints
 
     private static async Task<IResult> Create(CreateInvoiceRequest request, EinvoiceDbContext db, CancellationToken ct)
     {
+        if (request is null || request.Lines is null
+            || string.IsNullOrWhiteSpace(request.IssueDate) || string.IsNullOrWhiteSpace(request.DueDate))
+        {
+            return Results.Problem(
+                title: "Validation failed",
+                detail: "'lines', 'issueDate' and 'dueDate' are required.",
+                statusCode: 400);
+        }
+
         try
         {
             var lines = request.Lines.Select(l => InvoiceLine.Create(l.Description, l.Quantity, l.UnitPrice, l.VatRate));

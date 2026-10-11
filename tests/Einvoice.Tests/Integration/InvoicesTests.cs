@@ -112,6 +112,36 @@ public class InvoicesTests
     }
 
     [Fact]
+    public async Task PostInvoice_MissingLinesOrDates_Returns400Not500()
+    {
+        var client = Factory().CreateAuthedClient("invoice:write invoice:read");
+        var (seller, buyer) = await SeedPartiesAsync(client);
+
+        var withoutLines = new
+        {
+            number = "INV-NO-LINES",
+            issueDate = "2026-10-10",
+            dueDate = "2026-11-09",
+            currency = "EUR",
+            sellerId = seller,
+            buyerId = buyer
+        };
+        var noLines = await client.PostAsJsonAsync("/v1/invoices", withoutLines);
+        Assert.Equal(HttpStatusCode.BadRequest, noLines.StatusCode);
+
+        var withoutDates = new
+        {
+            number = "INV-NO-DATES",
+            currency = "EUR",
+            sellerId = seller,
+            buyerId = buyer,
+            lines = new[] { new { description = "X", quantity = 1, unitPrice = 10, vatRate = 0.23 } }
+        };
+        var noDates = await client.PostAsJsonAsync("/v1/invoices", withoutDates);
+        Assert.Equal(HttpStatusCode.BadRequest, noDates.StatusCode);
+    }
+
+    [Fact]
     public async Task GetAll_Returns200()
     {
         var client = Factory().CreateAuthedClient("invoice:read");
