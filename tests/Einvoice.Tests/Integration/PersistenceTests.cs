@@ -40,6 +40,9 @@ public class PersistenceTests
 
         Assert.Equal(369m, loaded.TotalAmount);
         Assert.Equal(InvoiceStatus.Issued, loaded.Status);
-        Assert.Equal(1, await readContext.OutboxMessages.CountAsync(o => o.PublishedAtUtc == null));
+
+        var stored = await readContext.OutboxMessages.SingleAsync(o => o.Id == outbox.Id);
+        Assert.Equal("einvoice.invoice.created.v1", stored.Type);
+        Assert.Equal(outbox.Payload, stored.Payload);
     }
 }
