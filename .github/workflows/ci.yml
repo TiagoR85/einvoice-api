@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: TiagoR85/ci-pipeline-templates/.github/workflows/reusable-dotnet-ci.yml@v1
+    with:
+      test-project: tests/Einvoice.Tests/Einvoice.Tests.csproj
+      dotnet-version: "10.0.x"
+      coverage-threshold: "80"
+
+  docker-scan:
+    uses: TiagoR85/ci-pipeline-templates/.github/workflows/reusable-docker-scan.yml@v1
+    with:
+      image-name: einvoice-api

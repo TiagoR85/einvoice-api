@@ -1,0 +1,270 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Einvoice.Infrastructure.Persistence;
+using Einvoice.Infrastructure.Redis;
+using Einvoice.Tests.Infrastructure;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace Einvoice.Tests.Integration;
+
+public class SecondClientFactory : EinvoiceApiFactory
+{
+    public SecondClientFactory() : base("second-secret-do-not-use-in-prod")
+    {
+    }
+
+    public override string ClientId => "einvoice-test-client-2";
+}
+
+[Collection("containers")]
+public class InvoicesTests
+{
+    private readonly ContainersFixture _containers;
+
+    public InvoicesTests(ContainersFixture containers) => _containers = containers;
+
+    private static EinvoiceApiFactory Factory() => new();
+
+    private async Task<(Guid sellerId, Guid buyerId)> SeedPartiesAsync(HttpClient client)
+    {
+        var seller = await client.PostAsJsonAsync("/v1/parties",
+            new { name = "Seller SA", country = "PT", vatNumber = "PT1", type = "Supplier" });
+        var buyer = await client.PostAsJsonAsync("/v1/parties",
+            new { name = "Buyer SA", country = "ES", vatNumber = "ES2", type = "Customer" });
+        var s = JsonDocument.Parse(await seller.Content.ReadAsStringAsync()).RootElement;
+        var b = JsonDocument.Parse(await buyer.Content.ReadAsStringAsync()).RootElement;
+        return (s.GetProperty("id").GetGuid(), b.GetProperty("id").GetGuid());
+    }
+
+    private static object InvoicePayload(Guid sellerId, Guid buyerId) => new
+    {
+        number = "INV-2026-0001",
+        issueDate = "2026-10-10",
+        dueDate = "2026-11-09",
+        currency = "EUR",
+        sellerId,
+        buyerId,
+        lines = new[]
+        {
+            new { description = "Consulting", quantity = 2, unitPrice = 100, vatRate = 0.23 }
+        }
+    };
+
+    private static async Task<HttpResponseMessage> PostInvoiceWithKeyAsync(HttpClient client, object payload, string? key = null)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/invoices")
+        {
+            Content = JsonContent.Create(payload)
+        };
+        request.Headers.Add("Idempotency-Key", key ?? Guid.NewGuid().ToString());
+        return await client.SendAsync(request);
+    }
+
+    [Fact]
+    public async Task PostInvoice_WithIdempotencyKey_Returns201Issued()
+    {
+        var client = Factory().CreateAuthedClient("invoice:write invoice:read");
+        var (seller, buyer) = await SeedPartiesAsync(client);
+
+        var response = await PostInvoiceWithKeyAsync(client, InvoicePayload(seller, buyer));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Issued", body.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task PostInvoice_WithoutIdempotencyKey_Returns400()
+    {
+        var client = Factory().CreateAuthedClient("invoice:write");
+        var (seller, buyer) = await SeedPartiesAsync(client);
+
+        var response = await client.PostAsJsonAsync("/v1/invoices", InvoicePayload(seller, buyer));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostInvoice_SameKey_ReplaysSameInvoiceId()
+    {
+        var client = Factory().CreateAuthedClient("invoice:write invoice:read");
+        var (seller, buyer) = await SeedPartiesAsync(client);
+        var key = Guid.NewGuid().ToString();
+
+        var res1 = await PostInvoiceWithKeyAsync(client, InvoicePayload(seller, buyer), key);
+        var id1 = (await res1.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var res2 = await PostInvoiceWithKeyAsync(client, InvoicePayload(seller, buyer), key);
+        var id2 = (await res2.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, res1.StatusCode);
+        Assert.Equal(id1, id2);
+    }
+
+    [Fact]
+    public async Task PostInvoice_SameKey_DifferentClients_DoesNotReplay()
+    {
+        var clientA = Factory().CreateAuthedClient("invoice:write invoice:read");
+        var (seller, buyer) = await SeedPartiesAsync(clientA);
+        var key = Guid.NewGuid().ToString();
+
+        var res1 = await PostInvoiceWithKeyAsync(clientA, InvoicePayload(seller, buyer), key);
+        var id1 = (await res1.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var clientB = new SecondClientFactory().CreateAuthedClient("invoice:write invoice:read");
+        var res2 = await PostInvoiceWithKeyAsync(clientB, InvoicePayload(seller, buyer), key);
+        var id2 = (await res2.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, res1.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, res2.StatusCode);
+        Assert.NotEqual(id1, id2);
+    }
+
+    [Fact]
+    public async Task PostInvoice_KeyClaimedByConcurrentRequest_Returns409()
+    {
+        var factory = Factory();
+        var client = factory.CreateAuthedClient("invoice:write invoice:read");
+        var (seller, buyer) = await SeedPartiesAsync(client);
+        var key = Guid.NewGuid().ToString();
+
+        var store = factory.Services.GetRequiredService<RedisIdempotencyStore>();
+        Assert.True(await store.TryClaimAsync($"{factory.ClientId}:{key}", TimeSpan.FromMinutes(5)));
+
+        var response = await PostInvoiceWithKeyAsync(client, InvoicePayload(seller, buyer), key);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostInvoice_WithWriteScope_Returns201Issued_AndWritesOutboxRow()
+    {
+        var client = Factory().CreateAuthedClient("invoice:write invoice:read");
+        var (seller, buyer) = await SeedPartiesAsync(client);
+
+        var response = await PostInvoiceWithKeyAsync(client, InvoicePayload(seller, buyer));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Issued", body.GetProperty("status").GetString());
+        var invoiceId = body.GetProperty("id").GetGuid();
+
+        var options = new DbContextOptionsBuilder<EinvoiceDbContext>()
+            .UseNpgsql(_containers.Postgres.GetConnectionString())
+            .Options;
+        await using var db = new EinvoiceDbContext(options);
+        var outbox = await db.OutboxMessages
+            .FirstOrDefaultAsync(o => o.Type == "einvoice.invoice.created.v1" && o.Payload.Contains(invoiceId.ToString()));
+        Assert.NotNull(outbox);
+    }
+
+    [Fact]
+    public async Task PostInvoice_WithoutToken_Returns401()
+    {
+        var factory = Factory();
+        var authed = factory.CreateAuthedClient("invoice:write invoice:read");
+        var (seller, buyer) = await SeedPartiesAsync(authed);
+
+        var client = factory.CreateClient();
+        var response = await client.PostAsJsonAsync("/v1/invoices", InvoicePayload(seller, buyer));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostInvoice_WithOnlyReadScope_Returns403()
+    {
+        var client = Factory().CreateAuthedClient("invoice:write invoice:read");
+        var (seller, buyer) = await SeedPartiesAsync(client);
+
+        var writeOnly = Factory().CreateAuthedClient("invoice:read");
+        var response = await writeOnly.PostAsJsonAsync("/v1/invoices", InvoicePayload(seller, buyer));
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostInvoice_InvalidBody_Returns400()
+    {
+        var client = Factory().CreateAuthedClient("invoice:write invoice:read");
+        var (seller, buyer) = await SeedPartiesAsync(client);
+        var payload = new
+        {
+            number = "INV-BAD",
+            issueDate = "2026-11-09",
+            dueDate = "2026-10-10",
+            currency = "EUR",
+            sellerId = seller,
+            buyerId = buyer,
+            lines = new[] { new { description = "X", quantity = 1, unitPrice = 10, vatRate = 0.23 } }
+        };
+
+        var response = await PostInvoiceWithKeyAsync(client, payload);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostInvoice_MissingLinesOrDates_Returns400Not500()
+    {
+        var client = Factory().CreateAuthedClient("invoice:write invoice:read");
+        var (seller, buyer) = await SeedPartiesAsync(client);
+
+        var withoutLines = new
+        {
+            number = "INV-NO-LINES",
+            issueDate = "2026-10-10",
+            dueDate = "2026-11-09",
+            currency = "EUR",
+            sellerId = seller,
+            buyerId = buyer
+        };
+        var noLines = await client.PostAsJsonAsync("/v1/invoices", withoutLines);
+        Assert.Equal(HttpStatusCode.BadRequest, noLines.StatusCode);
+
+        var withoutDates = new
+        {
+            number = "INV-NO-DATES",
+            currency = "EUR",
+            sellerId = seller,
+            buyerId = buyer,
+            lines = new[] { new { description = "X", quantity = 1, unitPrice = 10, vatRate = 0.23 } }
+        };
+        var noDates = await client.PostAsJsonAsync("/v1/invoices", withoutDates);
+        Assert.Equal(HttpStatusCode.BadRequest, noDates.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetAll_Returns200()
+    {
+        var client = Factory().CreateAuthedClient("invoice:read");
+        var response = await client.GetAsync("/v1/invoices");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetById_ReturnsCreatedInvoice()
+    {
+        var client = Factory().CreateAuthedClient("invoice:write invoice:read");
+        var (seller, buyer) = await SeedPartiesAsync(client);
+        var created = await PostInvoiceWithKeyAsync(client, InvoicePayload(seller, buyer));
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var fetched = await client.GetFromJsonAsync<JsonElement>($"/v1/invoices/{id}");
+
+        Assert.Equal("INV-2026-0001", fetched.GetProperty("number").GetString());
+        Assert.Single(fetched.GetProperty("lines").EnumerateArray());
+        Assert.Equal(246m, fetched.GetProperty("totalAmount").GetDecimal());
+    }
+
+    [Fact]
+    public async Task GetById_Unknown_Returns404()
+    {
+        var client = Factory().CreateAuthedClient("invoice:read");
+        var response = await client.GetAsync($"/v1/invoices/{Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+}
