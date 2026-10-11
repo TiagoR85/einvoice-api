@@ -38,11 +38,11 @@ public sealed class RabbitMqCloudEventPublisher : ICloudEventPublisher, IDisposa
 
     public bool IsConnected => _connection.IsOpen && _channel.IsOpen;
 
-    public async Task PublishAsync(string type, string payloadJson, CancellationToken cancellationToken = default)
+    public async Task PublishAsync(string type, string payloadJson, Guid messageId, CancellationToken cancellationToken = default)
     {
         var cloudEvent = new CloudEvent
         {
-            Id = Guid.NewGuid().ToString(),
+            Id = messageId.ToString(),
             Type = type,
             Source = new Uri("urn:einvoice-api"),
             Subject = type,

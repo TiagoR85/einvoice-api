@@ -109,6 +109,11 @@ public class OutboxTests
         Assert.True(seededPayloads.SetEquals(publishedSeededPayloads),
             $"Expected published payloads [{string.Join(", ", seededPayloads)}] but got [{string.Join(", ", publishedSeededPayloads)}]");
 
+        var seededIds = new HashSet<Guid> { first.Id, second.Id };
+        var publishedSeededIds = publisher.Published.Select(p => p.MessageId).Where(seededIds.Contains).ToHashSet();
+        Assert.True(seededIds.SetEquals(publishedSeededIds),
+            $"Expected published ids [{string.Join(", ", seededIds)}] but got [{string.Join(", ", publishedSeededIds)}]");
+
         await using var verify = await CreateDbContextAsync(provider);
         var stored = await verify.OutboxMessages.Where(o => o.Id == first.Id || o.Id == second.Id).ToListAsync();
         Assert.All(stored, m => Assert.NotNull(m.PublishedAtUtc));
@@ -215,11 +220,11 @@ public class OutboxTests
     {
         public bool IsConnected => true;
 
-        public List<(string Type, string Payload)> Published { get; } = [];
+        public List<(string Type, string Payload, Guid MessageId)> Published { get; } = [];
 
-        public Task PublishAsync(string type, string payloadJson, CancellationToken cancellationToken = default)
+        public Task PublishAsync(string type, string payloadJson, Guid messageId, CancellationToken cancellationToken = default)
         {
-            Published.Add((type, payloadJson));
+            Published.Add((type, payloadJson, messageId));
             return Task.CompletedTask;
         }
     }
@@ -228,7 +233,7 @@ public class OutboxTests
     {
         public bool IsConnected => true;
 
-        public Task PublishAsync(string type, string payloadJson, CancellationToken cancellationToken = default) =>
+        public Task PublishAsync(string type, string payloadJson, Guid messageId, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("broker unavailable");
     }
 }

@@ -33,7 +33,7 @@ public class RabbitMqHealthCheckTests
     {
         public bool IsConnected { get; init; }
 
-        public Task PublishAsync(string type, string payloadJson, CancellationToken cancellationToken = default) =>
+        public Task PublishAsync(string type, string payloadJson, Guid messageId, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
     }
 }

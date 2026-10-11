@@ -61,7 +61,7 @@ public sealed class OutboxDispatcher : BackgroundService
             message.IncrementAttempt();
             try
             {
-                await _publisher.PublishAsync(message.Type, message.Payload, cancellationToken);
+                await _publisher.PublishAsync(message.Type, message.Payload, message.Id, cancellationToken);
                 message.MarkPublished(DateTimeOffset.UtcNow);
                 published++;
             }
