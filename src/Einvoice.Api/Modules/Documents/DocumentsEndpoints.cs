@@ -3,6 +3,7 @@ using Einvoice.Infrastructure.Persistence;
 using Einvoice.Infrastructure.Redis;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Security.Claims;
 using System.Text.Json;
 
 namespace Einvoice.Api.Modules.Documents;
@@ -25,6 +26,7 @@ public static class DocumentsEndpoints
         EinvoiceDbContext db,
         RedisIdempotencyStore idempotency,
         HttpContext http,
+        IConfiguration configuration,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
@@ -40,10 +42,16 @@ public static class DocumentsEndpoints
         if (!http.Request.Headers.TryGetValue("Idempotency-Key", out var key) || string.IsNullOrWhiteSpace(key))
             return Results.Problem(title: "Idempotency-Key header is required.", statusCode: 400);
 
-        var claimed = await idempotency.TryClaimAsync(key!, TimeSpan.FromHours(24));
+        var scopedKey = $"{ResolveClientSub(http)}:{key}";
+        var pendingTtl = TimeSpan.FromSeconds(
+            int.TryParse(configuration["Idempotency:PendingTtlSeconds"], out var pendingSeconds) ? pendingSeconds : 60);
+        var completedTtl = TimeSpan.FromHours(
+            int.TryParse(configuration["Idempotency:CompletedTtlHours"], out var completedHours) ? completedHours : 24);
+
+        var claimed = await idempotency.TryClaimAsync(scopedKey, pendingTtl);
         if (!claimed)
         {
-            var stored = await idempotency.GetAsync(key!);
+            var stored = await idempotency.GetAsync(scopedKey);
             if (stored is null || stored == RedisIdempotencyStore.PendingMarker)
             {
                 return Results.Problem(
@@ -80,28 +88,44 @@ public static class DocumentsEndpoints
             var json = JsonSerializer.Serialize(response, new JsonSerializerOptions(JsonSerializerDefaults.Web));
             try
             {
-                await idempotency.SetAsync(key!, json, TimeSpan.FromHours(24));
+                await idempotency.SetAsync(scopedKey, json, completedTtl);
             }
             catch (Exception ex)
             {
                 loggerFactory.CreateLogger("Documents.Idempotency").LogWarning(ex,
                     "Failed to store idempotency response for key {Key}; invoice {InvoiceId} is already committed.",
-                    key, invoice.Id);
+                    scopedKey, invoice.Id);
+
+                // Best effort: drop the pending marker so a retry is not stuck on 409.
+                try
+                {
+                    await idempotency.ReleaseAsync(scopedKey);
+                }
+                catch (Exception releaseEx)
+                {
+                    loggerFactory.CreateLogger("Documents.Idempotency").LogWarning(releaseEx,
+                        "Failed to release pending idempotency marker for key {Key}.", scopedKey);
+                }
             }
 
             return Results.Created($"/v1/invoices/{invoice.Id}", response);
         }
         catch (DomainValidationException ex)
         {
-            await idempotency.ReleaseAsync(key!);
+            await idempotency.ReleaseAsync(scopedKey);
             return Results.Problem(title: "Validation failed", detail: ex.Message, statusCode: 400);
         }
         catch (FormatException)
         {
-            await idempotency.ReleaseAsync(key!);
+            await idempotency.ReleaseAsync(scopedKey);
             return Results.Problem(title: "Validation failed", detail: "Dates must be ISO 8601 (yyyy-MM-dd).", statusCode: 400);
         }
     }
+
+    private static string ResolveClientSub(HttpContext http) =>
+        http.User.FindFirst("sub")?.Value
+        ?? http.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+        ?? "anonymous";
 
     private static async Task<IResult> List(EinvoiceDbContext db, CancellationToken ct)
     {

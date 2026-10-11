@@ -10,7 +10,7 @@ public class EinvoiceApiFactory : WebApplicationFactory<Program>
 {
     public static ContainersFixture? Containers { get; set; }
 
-    public string ClientId { get; } = "einvoice-test-client";
+    public virtual string ClientId => "einvoice-test-client";
     public string ClientSecret { get; }
 
     public EinvoiceApiFactory(string? clientSecret = null)

@@ -10,6 +10,15 @@ using Xunit;
 
 namespace Einvoice.Tests.Integration;
 
+public class SecondClientFactory : EinvoiceApiFactory
+{
+    public SecondClientFactory() : base("second-secret-do-not-use-in-prod")
+    {
+    }
+
+    public override string ClientId => "einvoice-test-client-2";
+}
+
 [Collection("containers")]
 public class InvoicesTests
 {
@@ -96,6 +105,25 @@ public class InvoicesTests
     }
 
     [Fact]
+    public async Task PostInvoice_SameKey_DifferentClients_DoesNotReplay()
+    {
+        var clientA = Factory().CreateAuthedClient("invoice:write invoice:read");
+        var (seller, buyer) = await SeedPartiesAsync(clientA);
+        var key = Guid.NewGuid().ToString();
+
+        var res1 = await PostInvoiceWithKeyAsync(clientA, InvoicePayload(seller, buyer), key);
+        var id1 = (await res1.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var clientB = new SecondClientFactory().CreateAuthedClient("invoice:write invoice:read");
+        var res2 = await PostInvoiceWithKeyAsync(clientB, InvoicePayload(seller, buyer), key);
+        var id2 = (await res2.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, res1.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, res2.StatusCode);
+        Assert.NotEqual(id1, id2);
+    }
+
+    [Fact]
     public async Task PostInvoice_KeyClaimedByConcurrentRequest_Returns409()
     {
         var factory = Factory();
@@ -104,7 +132,7 @@ public class InvoicesTests
         var key = Guid.NewGuid().ToString();
 
         var store = factory.Services.GetRequiredService<RedisIdempotencyStore>();
-        Assert.True(await store.TryClaimAsync(key, TimeSpan.FromMinutes(5)));
+        Assert.True(await store.TryClaimAsync($"{factory.ClientId}:{key}", TimeSpan.FromMinutes(5)));
 
         var response = await PostInvoiceWithKeyAsync(client, InvoicePayload(seller, buyer), key);
 
