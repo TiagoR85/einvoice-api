@@ -67,7 +67,9 @@ public static class DocumentsEndpoints
                 request.BuyerId,
                 lines);
 
-            var payload = JsonSerializer.Serialize(new { invoiceId = invoice.Id, invoice.Number, invoice.Currency, totalAmount = invoice.TotalAmount });
+            var payload = JsonSerializer.Serialize(
+                new { invoiceId = invoice.Id, invoice.Number, invoice.Currency, totalAmount = invoice.TotalAmount },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
             var outbox = OutboxMessage.Create("einvoice.invoice.created.v1", payload);
 
             db.Invoices.Add(invoice);
