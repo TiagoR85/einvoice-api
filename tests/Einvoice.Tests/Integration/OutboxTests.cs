@@ -213,6 +213,8 @@ public class OutboxTests
 
     private sealed class RecordingPublisher : ICloudEventPublisher
     {
+        public bool IsConnected => true;
+
         public List<(string Type, string Payload)> Published { get; } = [];
 
         public Task PublishAsync(string type, string payloadJson, CancellationToken cancellationToken = default)
@@ -224,6 +226,8 @@ public class OutboxTests
 
     private sealed class FailingPublisher : ICloudEventPublisher
     {
+        public bool IsConnected => true;
+
         public Task PublishAsync(string type, string payloadJson, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("broker unavailable");
     }

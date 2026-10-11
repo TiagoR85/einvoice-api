@@ -11,9 +11,9 @@ public sealed class RabbitMqHealthCheck : IHealthCheck
 
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken ct = default)
     {
-        // publisher mantem conexao viva; construcao no DI falharia no startup se RabbitMQ estivesse fora
-        return Task.FromResult(_publisher is RabbitMqCloudEventPublisher
-            ? HealthCheckResult.Healthy("RabbitMQ connection held")
-            : HealthCheckResult.Unhealthy("Publisher not initialized"));
+        // le apenas IsOpen (sem I/O bloqueante); construcao no DI falharia no startup se RabbitMQ estivesse fora
+        return Task.FromResult(_publisher.IsConnected
+            ? HealthCheckResult.Healthy("RabbitMQ connection open")
+            : HealthCheckResult.Unhealthy("RabbitMQ connection closed"));
     }
 }

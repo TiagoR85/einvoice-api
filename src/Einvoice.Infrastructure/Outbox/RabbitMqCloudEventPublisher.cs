@@ -34,6 +34,8 @@ public sealed class RabbitMqCloudEventPublisher : ICloudEventPublisher, IDisposa
             .GetAwaiter().GetResult();
     }
 
+    public bool IsConnected => _connection.IsOpen && _channel.IsOpen;
+
     public async Task PublishAsync(string type, string payloadJson, CancellationToken cancellationToken = default)
     {
         var cloudEvent = new CloudEvent
