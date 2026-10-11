@@ -1,3 +1,4 @@
+using Einvoice.Infrastructure.Outbox;
 using Einvoice.Infrastructure.Persistence;
 using Einvoice.Infrastructure.Redis;
 using Microsoft.EntityFrameworkCore;
@@ -72,6 +73,9 @@ public static class DependencyInjection
         });
 
         services.AddSingleton<RedisIdempotencyStore>();
+
+        services.AddSingleton<ICloudEventPublisher, StubCloudEventPublisher>();
+        services.AddHostedService<OutboxDispatcher>();
 
         return services;
     }
