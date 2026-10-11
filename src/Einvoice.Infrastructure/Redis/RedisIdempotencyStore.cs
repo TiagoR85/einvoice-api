@@ -1,23 +1,29 @@
-using Microsoft.Extensions.Caching.Distributed;
-using System.Text;
+using StackExchange.Redis;
 
 namespace Einvoice.Infrastructure.Redis;
 
 public sealed class RedisIdempotencyStore
 {
-    private readonly IDistributedCache _cache;
+    public const string PendingMarker = "__pending__";
 
-    public RedisIdempotencyStore(IDistributedCache cache) => _cache = cache;
+    private readonly IConnectionMultiplexer _redis;
+
+    public RedisIdempotencyStore(IConnectionMultiplexer redis) => _redis = redis;
+
+    private static string Key(string key) => $"idem:{key}";
 
     public async Task<string?> GetAsync(string key)
     {
-        var bytes = await _cache.GetAsync($"idem:{key}");
-        return bytes is null ? null : Encoding.UTF8.GetString(bytes);
+        var value = await _redis.GetDatabase().StringGetAsync(Key(key));
+        return value.IsNull ? null : value.ToString();
     }
 
-    public async Task SetAsync(string key, string value, TimeSpan ttl)
-    {
-        await _cache.SetAsync($"idem:{key}", Encoding.UTF8.GetBytes(value),
-            new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = ttl });
-    }
+    public async Task<bool> TryClaimAsync(string key, TimeSpan ttl) =>
+        await _redis.GetDatabase().StringSetAsync(Key(key), PendingMarker, ttl, When.NotExists);
+
+    public async Task SetAsync(string key, string value, TimeSpan ttl) =>
+        await _redis.GetDatabase().StringSetAsync(Key(key), value, ttl);
+
+    public async Task ReleaseAsync(string key) =>
+        await _redis.GetDatabase().KeyDeleteAsync(Key(key));
 }

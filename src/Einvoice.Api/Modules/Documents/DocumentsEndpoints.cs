@@ -2,6 +2,7 @@ using Einvoice.Domain;
 using Einvoice.Infrastructure.Persistence;
 using Einvoice.Infrastructure.Redis;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
 namespace Einvoice.Api.Modules.Documents;
@@ -24,6 +25,7 @@ public static class DocumentsEndpoints
         EinvoiceDbContext db,
         RedisIdempotencyStore idempotency,
         HttpContext http,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         if (request is null || request.Lines is null
@@ -38,9 +40,20 @@ public static class DocumentsEndpoints
         if (!http.Request.Headers.TryGetValue("Idempotency-Key", out var key) || string.IsNullOrWhiteSpace(key))
             return Results.Problem(title: "Idempotency-Key header is required.", statusCode: 400);
 
-        var cached = await idempotency.GetAsync(key!);
-        if (cached is not null)
-            return Results.Text(cached, "application/json");
+        var claimed = await idempotency.TryClaimAsync(key!, TimeSpan.FromHours(24));
+        if (!claimed)
+        {
+            var stored = await idempotency.GetAsync(key!);
+            if (stored is null || stored == RedisIdempotencyStore.PendingMarker)
+            {
+                return Results.Problem(
+                    title: "Request in progress",
+                    detail: "A request with this Idempotency-Key is already in progress. Retry shortly.",
+                    statusCode: 409);
+            }
+
+            return Results.Text(stored, "application/json");
+        }
 
         try
         {
@@ -63,16 +76,27 @@ public static class DocumentsEndpoints
 
             var response = invoice.ToResponse();
             var json = JsonSerializer.Serialize(response, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-            await idempotency.SetAsync(key!, json, TimeSpan.FromHours(24));
+            try
+            {
+                await idempotency.SetAsync(key!, json, TimeSpan.FromHours(24));
+            }
+            catch (Exception ex)
+            {
+                loggerFactory.CreateLogger("Documents.Idempotency").LogWarning(ex,
+                    "Failed to store idempotency response for key {Key}; invoice {InvoiceId} is already committed.",
+                    key, invoice.Id);
+            }
 
             return Results.Created($"/v1/invoices/{invoice.Id}", response);
         }
         catch (DomainValidationException ex)
         {
+            await idempotency.ReleaseAsync(key!);
             return Results.Problem(title: "Validation failed", detail: ex.Message, statusCode: 400);
         }
         catch (FormatException)
         {
+            await idempotency.ReleaseAsync(key!);
             return Results.Problem(title: "Validation failed", detail: "Dates must be ISO 8601 (yyyy-MM-dd).", statusCode: 400);
         }
     }

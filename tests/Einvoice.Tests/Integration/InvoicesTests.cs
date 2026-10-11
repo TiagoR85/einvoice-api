@@ -2,8 +2,10 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Einvoice.Infrastructure.Persistence;
+using Einvoice.Infrastructure.Redis;
 using Einvoice.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Einvoice.Tests.Integration;
@@ -91,6 +93,22 @@ public class InvoicesTests
 
         Assert.Equal(HttpStatusCode.Created, res1.StatusCode);
         Assert.Equal(id1, id2);
+    }
+
+    [Fact]
+    public async Task PostInvoice_KeyClaimedByConcurrentRequest_Returns409()
+    {
+        var factory = Factory();
+        var client = factory.CreateAuthedClient("invoice:write invoice:read");
+        var (seller, buyer) = await SeedPartiesAsync(client);
+        var key = Guid.NewGuid().ToString();
+
+        var store = factory.Services.GetRequiredService<RedisIdempotencyStore>();
+        Assert.True(await store.TryClaimAsync(key, TimeSpan.FromMinutes(5)));
+
+        var response = await PostInvoiceWithKeyAsync(client, InvoicePayload(seller, buyer), key);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
     [Fact]

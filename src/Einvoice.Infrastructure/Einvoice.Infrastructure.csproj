@@ -16,7 +16,6 @@
     </PackageReference>
     <PackageReference Include="RabbitMQ.Client" />
     <PackageReference Include="StackExchange.Redis" />
-    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" />
     <PackageReference Include="CloudNative.CloudEvents" />
     <PackageReference Include="CloudNative.CloudEvents.SystemTextJson" />
   </ItemGroup>
