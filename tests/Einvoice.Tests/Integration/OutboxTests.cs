@@ -7,6 +7,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
+using RabbitMQ.Client;
+using System.Net;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 using Xunit;
 
 namespace Einvoice.Tests.Integration;
@@ -95,14 +100,14 @@ public class OutboxTests
 
         var published = await dispatcher.DispatchBatchAsync(CancellationToken.None);
 
-        var seededIds = new HashSet<Guid> { first.Id, second.Id };
-        var publishedSeededIds = publisher.Published
-            .Where(m => seededIds.Contains(m.Id))
-            .Select(m => m.Id)
+        var seededPayloads = new HashSet<string> { first.Payload, second.Payload };
+        var publishedSeededPayloads = publisher.Published
+            .Select(p => p.Payload)
+            .Where(seededPayloads.Contains)
             .ToHashSet();
         Assert.Equal(2, published);
-        Assert.True(seededIds.SetEquals(publishedSeededIds),
-            $"Expected published ids [{string.Join(", ", seededIds)}] but got [{string.Join(", ", publishedSeededIds)}]");
+        Assert.True(seededPayloads.SetEquals(publishedSeededPayloads),
+            $"Expected published payloads [{string.Join(", ", seededPayloads)}] but got [{string.Join(", ", publishedSeededPayloads)}]");
 
         await using var verify = await CreateDbContextAsync(provider);
         var stored = await verify.OutboxMessages.Where(o => o.Id == first.Id || o.Id == second.Id).ToListAsync();
@@ -134,20 +139,92 @@ public class OutboxTests
         Assert.Equal(1, stored.Attempts);
     }
 
+    [Fact]
+    public async Task Dispatcher_PublishesInvoiceCreatedEventToRabbitMq()
+    {
+        var factory = new ConnectionFactory
+        {
+            HostName = _containers.RabbitMq.Hostname,
+            Port = _containers.RabbitMq.GetMappedPublicPort(5672),
+            UserName = "rabbitmq",
+            Password = "rabbitmq"
+        };
+        await using var connection = await factory.CreateConnectionAsync();
+        await using var channel = await connection.CreateChannelAsync();
+        await channel.ExchangeDeclareAsync("einvoice.events", ExchangeType.Topic, durable: true);
+        var queue = await channel.QueueDeclareAsync($"test-einvoice-events-{Guid.NewGuid()}", durable: false,
+            exclusive: true, autoDelete: true);
+        await channel.QueueBindAsync(queue.QueueName, "einvoice.events", "#");
+
+        await using var apiFactory = new EinvoiceApiFactory();
+        var client = apiFactory.CreateAuthedClient("invoice:write invoice:read");
+        var sellerResp = await client.PostAsJsonAsync("/v1/parties",
+            new { name = "S", country = "PT", vatNumber = (string?)null, type = "Supplier" });
+        var buyerResp = await client.PostAsJsonAsync("/v1/parties",
+            new { name = "B", country = "ES", vatNumber = (string?)null, type = "Customer" });
+        var s = JsonDocument.Parse(await sellerResp.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetGuid();
+        var b = JsonDocument.Parse(await buyerResp.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetGuid();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/invoices")
+        {
+            Content = new StringContent(
+                $"{{\"number\":\"INV-OB-{Guid.NewGuid():N}\",\"issueDate\":\"2026-10-10\",\"dueDate\":\"2026-11-09\",\"currency\":\"EUR\",\"sellerId\":\"{s}\",\"buyerId\":\"{b}\",\"lines\":[{{\"description\":\"X\",\"quantity\":1,\"unitPrice\":10,\"vatRate\":0.23}}]}}",
+                Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        var created = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var createdBody = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+        var invoiceId = createdBody.RootElement.GetProperty("id").GetGuid();
+
+        string? body = null;
+        string? contentType = null;
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (body is null && DateTime.UtcNow < deadline)
+        {
+            var result = await channel.BasicGetAsync(queue.QueueName, autoAck: true);
+            if (result is not null)
+            {
+                body = Encoding.UTF8.GetString(result.Body.ToArray());
+                contentType = result.BasicProperties.ContentType?.ToString();
+            }
+            else
+            {
+                await Task.Delay(500);
+            }
+        }
+
+        Assert.True(body is not null, "Expected invoice.created CloudEvent on einvoice.events within 30s.");
+        Assert.NotNull(contentType);
+        Assert.Contains("application/cloudevents+json", contentType);
+        Assert.Contains("einvoice.invoice.created.v1", body);
+        Assert.Contains("invoiceId", body);
+
+        using var cloudEvent = JsonDocument.Parse(body!);
+        var root = cloudEvent.RootElement;
+        Assert.Equal("1.0", root.GetProperty("specversion").GetString());
+        Assert.Equal("einvoice.invoice.created.v1", root.GetProperty("type").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("id").GetString()));
+        Assert.Equal("urn:einvoice-api", root.GetProperty("source").GetString());
+        var data = root.GetProperty("data");
+        Assert.Equal(JsonValueKind.Object, data.ValueKind);
+        Assert.Equal(invoiceId, data.GetProperty("invoiceId").GetGuid());
+    }
+
     private sealed class RecordingPublisher : ICloudEventPublisher
     {
-        public List<OutboxMessage> Published { get; } = [];
+        public List<(string Type, string Payload)> Published { get; } = [];
 
-        public Task PublishAsync(OutboxMessage message, CancellationToken cancellationToken = default)
+        public Task PublishAsync(string type, string payloadJson, CancellationToken cancellationToken = default)
         {
-            Published.Add(message);
+            Published.Add((type, payloadJson));
             return Task.CompletedTask;
         }
     }
 
     private sealed class FailingPublisher : ICloudEventPublisher
     {
-        public Task PublishAsync(OutboxMessage message, CancellationToken cancellationToken = default) =>
+        public Task PublishAsync(string type, string payloadJson, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("broker unavailable");
     }
 }

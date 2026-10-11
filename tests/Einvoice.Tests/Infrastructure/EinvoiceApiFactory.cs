@@ -30,8 +30,8 @@ public sealed class EinvoiceApiFactory : WebApplicationFactory<Program>
                 ["ConnectionStrings:Redis"] = c.Redis.GetConnectionString(),
                 ["RabbitMq:Host"] = c.RabbitMq.Hostname,
                 ["RabbitMq:Port"] = c.RabbitMq.GetMappedPublicPort(5672).ToString(),
-                ["RabbitMq:Username"] = "guest",
-                ["RabbitMq:Password"] = "guest",
+                ["RabbitMq:Username"] = "rabbitmq",
+                ["RabbitMq:Password"] = "rabbitmq",
                 ["Oidc:ClientId"] = ClientId,
                 ["Oidc:ClientSecret"] = ClientSecret,
                 ["Outbox:IntervalMs"] = "500"

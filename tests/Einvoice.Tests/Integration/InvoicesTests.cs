@@ -131,7 +131,6 @@ public class InvoicesTests
         var outbox = await db.OutboxMessages
             .FirstOrDefaultAsync(o => o.Type == "einvoice.invoice.created.v1" && o.Payload.Contains(invoiceId.ToString()));
         Assert.NotNull(outbox);
-        Assert.Null(outbox!.PublishedAtUtc);
     }
 
     [Fact]

@@ -73,7 +73,7 @@ public static class DependencyInjection
 
         services.AddSingleton<RedisIdempotencyStore>();
 
-        services.AddSingleton<ICloudEventPublisher, StubCloudEventPublisher>();
+        services.AddSingleton<ICloudEventPublisher, RabbitMqCloudEventPublisher>();
         services.AddHostedService<OutboxDispatcher>();
 
         return services;
