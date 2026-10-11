@@ -182,38 +182,64 @@ public class OutboxTests
         var createdBody = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
         var invoiceId = createdBody.RootElement.GetProperty("id").GetGuid();
 
-        string? body = null;
         string? contentType = null;
-        var deadline = DateTime.UtcNow.AddSeconds(30);
-        while (body is null && DateTime.UtcNow < deadline)
+        JsonDocument? matched = null;
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (matched is null && DateTime.UtcNow < deadline)
         {
             var result = await channel.BasicGetAsync(queue.QueueName, autoAck: true);
-            if (result is not null)
+            if (result is null)
             {
-                body = Encoding.UTF8.GetString(result.Body.ToArray());
-                contentType = result.BasicProperties.ContentType?.ToString();
+                await Task.Delay(250);
+                continue;
             }
-            else
+
+            var candidate = Encoding.UTF8.GetString(result.Body.ToArray());
+            try
             {
-                await Task.Delay(500);
+                using var doc = JsonDocument.Parse(candidate);
+                if (doc.RootElement.TryGetProperty("data", out var candidateData)
+                    && candidateData.ValueKind == JsonValueKind.Object
+                    && candidateData.TryGetProperty("invoiceId", out var candidateId)
+                    && candidateId.GetGuid() == invoiceId)
+                {
+                    matched = JsonDocument.Parse(candidate);
+                    contentType = result.BasicProperties.ContentType?.ToString();
+                }
+            }
+            catch (JsonException)
+            {
+                // Unrelated or malformed message: keep polling until the deadline.
             }
         }
 
-        Assert.True(body is not null, "Expected invoice.created CloudEvent on einvoice.events within 30s.");
+        Assert.True(matched is not null,
+            $"Expected invoice.created CloudEvent for {invoiceId} within 10s.");
         Assert.NotNull(contentType);
         Assert.Contains("application/cloudevents+json", contentType);
-        Assert.Contains("einvoice.invoice.created.v1", body);
-        Assert.Contains("invoiceId", body);
 
-        using var cloudEvent = JsonDocument.Parse(body!);
-        var root = cloudEvent.RootElement;
-        Assert.Equal("1.0", root.GetProperty("specversion").GetString());
-        Assert.Equal("einvoice.invoice.created.v1", root.GetProperty("type").GetString());
-        Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("id").GetString()));
-        Assert.Equal("urn:einvoice-api", root.GetProperty("source").GetString());
-        var data = root.GetProperty("data");
-        Assert.Equal(JsonValueKind.Object, data.ValueKind);
-        Assert.Equal(invoiceId, data.GetProperty("invoiceId").GetGuid());
+        using (matched!)
+        {
+            var root = matched!.RootElement;
+            var body = root.GetRawText();
+            Assert.Contains("einvoice.invoice.created.v1", body);
+            Assert.Contains("invoiceId", body);
+            Assert.Equal("1.0", root.GetProperty("specversion").GetString());
+            Assert.Equal("einvoice.invoice.created.v1", root.GetProperty("type").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("id").GetString()));
+            Assert.Equal("urn:einvoice-api", root.GetProperty("source").GetString());
+            var data = root.GetProperty("data");
+            Assert.Equal(JsonValueKind.Object, data.ValueKind);
+            Assert.Equal(invoiceId, data.GetProperty("invoiceId").GetGuid());
+
+            var options = new DbContextOptionsBuilder<EinvoiceDbContext>()
+                .UseNpgsql(_containers.Postgres.GetConnectionString())
+                .Options;
+            await using var db = new EinvoiceDbContext(options);
+            var outboxRow = await db.OutboxMessages
+                .SingleAsync(o => o.Payload.Contains(invoiceId.ToString()));
+            Assert.Equal(outboxRow.Id.ToString(), root.GetProperty("id").GetString());
+        }
     }
 
     private sealed class RecordingPublisher : ICloudEventPublisher
