@@ -23,7 +23,9 @@ public sealed class RabbitMqCloudEventPublisher : ICloudEventPublisher, IDisposa
             HostName = rmq["Host"] ?? "localhost",
             Port = int.TryParse(rmq["Port"], out var port) ? port : 5672,
             UserName = rmq["Username"] ?? "guest",
-            Password = rmq["Password"] ?? "guest"
+            Password = rmq["Password"] ?? "guest",
+            AutomaticRecoveryEnabled = true,
+            NetworkRecoveryInterval = TimeSpan.FromSeconds(10)
         };
 
         _connection = factory.CreateConnectionAsync().GetAwaiter().GetResult();
