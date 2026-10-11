@@ -12,8 +12,13 @@ between Postgres and RabbitMQ.
 I write the invoice and an OutboxMessage row in the same Postgres transaction.
 A BackgroundService (OutboxDispatcher) polls unpublished rows and publishes
 them as CloudEvents 1.0 structured-mode JSON to the topic exchange
-`einvoice.events`, then marks them published. Delivery is at-least-once: the
-consumer must deduplicate by invoiceId (implemented in the worker repo).
+`einvoice.events`, then marks them published. The CloudEvent `id` is the
+OutboxMessage row id, so every publish attempt of the same row carries the
+same event id and consumers can deduplicate deterministically. The payload is
+serialized with `JsonSerializerDefaults.Web`, so every property is camelCase
+(`invoiceId`, `number`, `currency`, `totalAmount`) and matches the API's JSON
+conventions. Delivery is at-least-once: the consumer must deduplicate by
+invoiceId (implemented in the worker repo) or by the stable event id.
 
 ## Alternatives considered
 
@@ -28,3 +33,8 @@ consumer must deduplicate by invoiceId (implemented in the worker repo).
   of the contract (see einvoice-worker).
 - The dispatcher polls every Outbox:IntervalMs (default 2s); a future
   improvement is LISTEN/NOTIFY to remove polling latency.
+- I assume a single dispatcher instance: rows are selected with a plain
+  ORDER BY + LIMIT, without SELECT ... FOR UPDATE SKIP LOCKED, so two
+  instances would race and publish the same row twice. That is fine for the
+  current single-instance deployment; I will add SKIP LOCKED before scaling
+  out.
