@@ -6,7 +6,7 @@ using System.Text.Json;
 
 namespace Einvoice.Tests.Infrastructure;
 
-public sealed class EinvoiceApiFactory : WebApplicationFactory<Program>
+public class EinvoiceApiFactory : WebApplicationFactory<Program>
 {
     public static ContainersFixture? Containers { get; set; }
 
@@ -34,7 +34,8 @@ public sealed class EinvoiceApiFactory : WebApplicationFactory<Program>
                 ["RabbitMq:Password"] = "rabbitmq",
                 ["Oidc:ClientId"] = ClientId,
                 ["Oidc:ClientSecret"] = ClientSecret,
-                ["Outbox:IntervalMs"] = "500"
+                ["Outbox:IntervalMs"] = "500",
+                ["RateLimit:PerMinute"] = "100000"
             });
         });
     }
