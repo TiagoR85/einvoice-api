@@ -70,6 +70,12 @@ public class OutboxTests
         return db;
     }
 
+    private static async Task CleanOutboxAsync(IServiceProvider provider)
+    {
+        await using var db = await CreateDbContextAsync(provider);
+        await db.OutboxMessages.ExecuteDeleteAsync();
+    }
+
     [Fact]
     public async Task Dispatcher_PublishesPendingMessages_AndMarksThemPublished()
     {
@@ -78,6 +84,7 @@ public class OutboxTests
         var publisher = new RecordingPublisher();
         using var dispatcher = CreateDispatcher(provider, publisher);
 
+        await CleanOutboxAsync(provider);
         var first = OutboxMessage.Create("einvoice.invoice.created.v1", "{\"invoiceId\":\"" + Guid.NewGuid() + "\"}");
         var second = OutboxMessage.Create("einvoice.invoice.created.v1", "{\"invoiceId\":\"" + Guid.NewGuid() + "\"}");
         await using (var seed = await CreateDbContextAsync(provider))
@@ -88,8 +95,14 @@ public class OutboxTests
 
         var published = await dispatcher.DispatchBatchAsync(CancellationToken.None);
 
+        var seededIds = new HashSet<Guid> { first.Id, second.Id };
+        var publishedSeededIds = publisher.Published
+            .Where(m => seededIds.Contains(m.Id))
+            .Select(m => m.Id)
+            .ToHashSet();
         Assert.Equal(2, published);
-        Assert.Equal([first.Id, second.Id], publisher.Published.Select(m => m.Id).ToArray());
+        Assert.True(seededIds.SetEquals(publishedSeededIds),
+            $"Expected published ids [{string.Join(", ", seededIds)}] but got [{string.Join(", ", publishedSeededIds)}]");
 
         await using var verify = await CreateDbContextAsync(provider);
         var stored = await verify.OutboxMessages.Where(o => o.Id == first.Id || o.Id == second.Id).ToListAsync();
@@ -103,6 +116,7 @@ public class OutboxTests
         await using var provider = BuildProvider(connectionString);
         using var dispatcher = CreateDispatcher(provider, new FailingPublisher());
 
+        await CleanOutboxAsync(provider);
         var message = OutboxMessage.Create("einvoice.invoice.created.v1", "{\"invoiceId\":\"" + Guid.NewGuid() + "\"}");
         await using (var seed = await CreateDbContextAsync(provider))
         {
