@@ -30,7 +30,7 @@ The scenario is simple on purpose; the engineering is not.
 ```bash
 git clone https://github.com/TiagoR85/einvoice-api.git
 cd einvoice-api
-cp .env.example .env   # set POSTGRES_PASSWORD and OIDC_CLIENT_SECRET
+cp .env.example .env   # set POSTGRES_PASSWORD, OIDC_CLIENT_SECRET and OIDC_WORKER_CLIENT_SECRET
 docker compose up --build
 curl http://localhost:8080/health/ready
 ```
