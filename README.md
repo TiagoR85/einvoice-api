@@ -48,6 +48,12 @@ curl -s http://localhost:8080/connect/token \
   -d "scope=invoice:read invoice:write"
 ```
 
+## One-command hub demo
+
+The full family (API + worker + UI + Postgres + Redis + RabbitMQ + Silo) boots from
+[`einvoice-ui`](https://github.com/TiagoR85/einvoice-ui) with a single
+`docker compose up --build` — see that repo's README.
+
 ## API reference (v1)
 
 | Method | Path | Scope | Notes |
@@ -76,12 +82,13 @@ Testcontainers — Docker is required. CI enforces line coverage >= 80%.
 - [ADR-0002](docs/adr/0002-transactional-outbox-cloudevents.md) — Transactional outbox + CloudEvents
 - [ADR-0003](docs/adr/0003-modular-monolith.md) — Modular monolith
 - [ADR-0004](docs/adr/0004-peppol-deferred.md) — Peppol deferred from v1
+- [ADR-0005](docs/adr/0005-invoice-completed-inbox.md) — Inbox consumer flips status on `invoice.completed.v1`
 
 ## Roadmap
 
 - [x] v1: invoices + parties + outbox events
-- [ ] Worker: PDF generation (iText) + MinIO storage + `invoice.completed`
-- [ ] Blazor server-rendered UI for invoice list/creation
+- [x] Worker: PDF generation (iText) + Silo storage + `invoice.completed`
+- [x] Blazor server-rendered UI for invoice list/creation ([`einvoice-ui`](https://github.com/TiagoR85/einvoice-ui), one-command hub demo)
 - [ ] Peppol access point (see ADR-0004)
 - [ ] Demo stack on my VPS with docker compose profiles
 
