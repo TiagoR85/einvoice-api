@@ -42,6 +42,7 @@ services:
       RabbitMq__Password: ${RABBITMQ_DEFAULT_PASS:-guest}
       Oidc__ClientId: einvoice-client
       Oidc__ClientSecret: ${OIDC_CLIENT_SECRET:?set in .env}
+      Oidc__WorkerClientSecret: ${OIDC_WORKER_CLIENT_SECRET:?set in .env}
     depends_on:
       postgres:
         condition: service_healthy

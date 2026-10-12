@@ -13,6 +13,9 @@ public class EinvoiceApiFactory : WebApplicationFactory<Program>
     public virtual string ClientId => "einvoice-test-client";
     public string ClientSecret { get; }
 
+    public virtual string WorkerClientId => "einvoice-worker";
+    public const string WorkerClientSecret = "worker-test-secret-do-not-use-in-prod";
+
     public EinvoiceApiFactory(string? clientSecret = null)
     {
         ClientSecret = clientSecret ?? "test-secret-do-not-use-in-prod";
@@ -34,6 +37,7 @@ public class EinvoiceApiFactory : WebApplicationFactory<Program>
                 ["RabbitMq:Password"] = "rabbitmq",
                 ["Oidc:ClientId"] = ClientId,
                 ["Oidc:ClientSecret"] = ClientSecret,
+                ["Oidc:WorkerClientSecret"] = WorkerClientSecret,
                 ["Outbox:IntervalMs"] = "500",
                 ["RateLimit:PerMinute"] = "100000"
             });

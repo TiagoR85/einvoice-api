@@ -63,4 +63,36 @@ public class AuthTests
             }));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
+
+    [Fact]
+    public async Task WorkerClient_ReturnsToken_ForReadOnlyScope()
+    {
+        var factory = new EinvoiceApiFactory();
+        using var client = factory.CreateClient();
+        var response = await client.PostAsync("/connect/token",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "client_credentials",
+                ["client_id"] = factory.WorkerClientId,
+                ["client_secret"] = EinvoiceApiFactory.WorkerClientSecret,
+                ["scope"] = "invoice:read"
+            }));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WorkerClient_IsRejected_ForWriteScope()
+    {
+        var factory = new EinvoiceApiFactory();
+        using var client = factory.CreateClient();
+        var response = await client.PostAsync("/connect/token",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "client_credentials",
+                ["client_id"] = factory.WorkerClientId,
+                ["client_secret"] = EinvoiceApiFactory.WorkerClientSecret,
+                ["scope"] = "invoice:write"
+            }));
+        Assert.False(response.IsSuccessStatusCode);
+    }
 }
