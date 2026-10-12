@@ -1,3 +1,4 @@
+using Einvoice.Infrastructure.Inbox;
 using Einvoice.Infrastructure.Outbox;
 using Einvoice.Infrastructure.Persistence;
 using Einvoice.Infrastructure.Redis;
@@ -75,6 +76,7 @@ public static class DependencyInjection
 
         services.AddSingleton<ICloudEventPublisher, RabbitMqCloudEventPublisher>();
         services.AddHostedService<OutboxDispatcher>();
+        services.AddHostedService<InvoiceCompletedConsumer>();
 
         return services;
     }
